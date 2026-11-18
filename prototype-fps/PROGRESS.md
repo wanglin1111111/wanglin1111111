@@ -18,6 +18,14 @@
   - char4_heavy_knight：0.85m → 2.1176
   节点结构统一为 0<world>→1<geometry_0>，rootScale=1，无额外缩放/平移，以上系数可直接作为 object.scale。
 
+## 第四批实现记录（2026-11-19）
+
+- 任务 1 完成：src/assets.js（loadCharacter：GLTFLoader + 归一化 + castShadow/receiveShadow + 材质检查）；main.js 摆位 char2/3/4 静态敌人（间距 ≥8m，朝向出生点）、char1 玩家侧；HUD 加 chars=x/4 与 postfx 状态。
+- 任务 2 完成：IBL（RoomEnvironment+PMREMGenerator）+ ACESFilmicToneMapping + 实时阴影（方向光 2048，范围收在 40m 场地；r187 WebGPU 已移除 PCFSoftShadowMap，用 PCFShadowMap）+ bloom 后处理（RenderPipeline + TSL，仅 webgpu 后端，fallback 降级直接渲染）。
+- 踩坑记录：r187 的 RenderPipeline 只从 three/webgpu 导出（three 核心命名空间没有），渲染方法是 render()（无参），不是 execute()；PCFSoftShadowMap 运行时告警已回退为 PCFShadowMap。
+- dev 验证：backend=webgpu，chars=4/4，postfx=on。
+- fps 三次采样与 6 张机位截图：等部署后在真实窗口完成（预览面板 0×0 时渲染器拿不到 surface，测不出真实帧率），结果回写本节。
+
 ## 任务 0 开工回执（2026-11-18）
 
 - 理解的目标：做一个浏览器里能跑的第一人称射击原型 prototype-fps，8 周内做成一关（第一人称控制、三武器切换、连击槽、灰盒关卡加 3 个敌人），3 分钟可玩闭环 + 缺陷清单。

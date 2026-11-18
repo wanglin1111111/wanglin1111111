@@ -1,5 +1,23 @@
 # PROGRESS.md
 
+## 第四批（PBR 角色进场景＋渲染管线）开工回执（2026-11-18）
+
+- 理解目标：把 assets/ 里 4 个已生成 PBR 角色 GLB 真正加载进场景（char2/3/4 当静态敌人、char1 玩家侧道具），点亮 IBL 环境光＋实时阴影＋PBR 材质＋节点式后处理，画面从灰盒变有真实角色与光照。
+- 顺序：任务 0 核验 → 资产管线 loadCharacter → 光照与后处理 → 6 机位截图 → 反向验证 → 线上同步。
+- 最大风险：4 个 GLB 各 18–21MB 未压缩，首屏加载与帧率有压力（本批不压缩，留给后续批次）；webgpu 下节点后处理若报错需降级保 IBL＋阴影；隐藏预览窗口 0×0 会让渲染器 init 失败，截图需等窗口可见。
+
+## 任务 0 实测（第四批，2026-11-18）
+
+- 基线：分支 prototype-fps；npm test 20/20 绿、skipped 0；npm run build 成功。
+- 后端：预览 HUD 显示 backend=webgpu（WebGL2 回退未触发）。
+- 资产可访问：dev server 对 /assets/char1_tactical_male.glb 返回 200、content-type=model/gltf-binary（同源可提供，Vite 从项目根读 assets/）。
+- GLB 实测高度与归一化到 1.8m 的 scale 系数（用 glTF 官方 accessor.min/max，非顶点包络，避免算法误差）：
+  - char1_tactical_male：1.85m → 0.973
+  - char2_moss_monster：2.2m → 0.8182
+  - char3_fem_soldier：0.617m → 2.9191
+  - char4_heavy_knight：0.85m → 2.1176
+  节点结构统一为 0<world>→1<geometry_0>，rootScale=1，无额外缩放/平移，以上系数可直接作为 object.scale。
+
 ## 任务 0 开工回执（2026-11-18）
 
 - 理解的目标：做一个浏览器里能跑的第一人称射击原型 prototype-fps，8 周内做成一关（第一人称控制、三武器切换、连击槽、灰盒关卡加 3 个敌人），3 分钟可玩闭环 + 缺陷清单。

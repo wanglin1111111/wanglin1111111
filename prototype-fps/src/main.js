@@ -1,8 +1,13 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
+import { PMREMGenerator, ACESFilmicToneMapping, PCFShadowMap, RenderPipeline } from 'three/webgpu';
+import { pass } from 'three/tsl';
+import { bloom } from 'three/addons/tsl/display/BloomNode.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { createPlayerController } from './playerController.js';
 import { swingKick } from './shooting.js';
 import { createCombat } from './combat.js';
+import { loadCharacter } from './assets.js';
 
 export async function createRenderer(canvasContainer) {
   const renderer = new WebGPURenderer({ antialias: true });
@@ -13,12 +18,67 @@ export async function createRenderer(canvasContainer) {
   return { renderer, backend };
 }
 
+// 点亮渲染管线：IBL 环境光 + 实时阴影 + ACES 色调映射 + bloom 后处理。
+// 后处理（RenderPipeline + TSL 节点）只在 webgpu 后端可用；webgl2-fallback 下降级为
+// 直接渲染（保 IBL + 阴影），并置 pipelineEnabled=false 供 PROGRESS 记录。
+export function setupLighting({ renderer, scene, camera, backend }) {
+  // IBL：RoomEnvironment 生成 PMREM 环境贴图
+  const pmrem = new PMREMGenerator(renderer);
+  const roomEnv = new RoomEnvironment();
+  const envMap = pmrem.fromScene(roomEnv, 0.04).texture;
+  scene.environment = envMap; // grep 锚点：scene.environment
+  pmrem.dispose();
+  roomEnv.dispose?.();
+
+  // 色调映射（PBR 材质不发死白死黑）
+  renderer.toneMapping = ACESFilmicToneMapping;
+
+  // 实时阴影：方向光 PCFSoft 2048，范围收在场地内（40m 场地）
+  const dirLight = scene.getObjectByName('keyLight') || new THREE.DirectionalLight(0xffffff, 1.2);
+  dirLight.name = 'keyLight';
+  dirLight.position.set(6, 12, 6);
+  dirLight.castShadow = true;
+  dirLight.shadow.mapSize.set(2048, 2048);
+  const cam = dirLight.shadow.camera;
+  cam.left = -20; cam.right = 20; cam.top = 20; cam.bottom = -20;
+  cam.near = 1; cam.far = 40;
+  scene.remove(...scene.children.filter((c) => c.isDirectionalLight)); // 清掉旧光，避免双光源
+  scene.add(dirLight);
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = PCFShadowMap; // r187 WebGPU 已移除 PCFSoftShadowMap
+
+  // 后处理：bloom。仅 webgpu 走 RenderPipeline；fallback 直接渲染
+  let pipeline = null;
+  let pipelineEnabled = false;
+  if (backend === 'webgpu') {
+    try {
+      pipeline = new RenderPipeline(renderer);
+      const scenePass = pass(scene, camera);
+      const sceneColor = scenePass.getTextureNode('output');
+      const bloomPass = bloom(sceneColor, 0.35, 0.4, 0.85); // strength/radius/threshold
+      pipeline.outputNode = sceneColor.add(bloomPass);
+      pipelineEnabled = true;
+    } catch (e) {
+      // 后处理搭不起来：降级直接渲染，保 IBL + 阴影（任务书：不许硬撑出假绿）
+      pipeline = null;
+      pipelineEnabled = false;
+      console.warn('[postfx] 节点后处理初始化失败，降级直接渲染：', e);
+    }
+  }
+
+  return { dirLight, pipeline, pipelineEnabled, renderFrame: (scene, camera) => {
+    if (pipeline) { pipeline.render(); } // renderer/scene/camera 已在构造时绑定
+    else { renderer.render(scene, camera); }
+  } };
+}
+
 export function createScene() {
   const scene = new THREE.Scene();
   const camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
   camera.position.set(0, 1.7, 5);
-  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
   const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+  dirLight.name = 'keyLight';
   dirLight.position.set(5, 10, 5);
   scene.add(dirLight);
 
@@ -90,10 +150,14 @@ async function main() {
   // 渲染器在 0x0 隐藏窗口下 init 会失败——不让它挡住游戏逻辑；失败时 HUD 标注 backend=none
   let renderer = null;
   let backend = 'none';
+  let renderFrame = () => {};
   try {
     const r = await createRenderer(document.body);
     renderer = r.renderer;
     backend = r.backend;
+    const lighting = setupLighting({ renderer, scene, camera, backend });
+    renderFrame = lighting.renderFrame;
+    window.__postfx = { enabled: lighting.pipelineEnabled, backend };
   } catch (e) {
     hud.textContent = 'renderer unavailable (window too small / no WebGPU): ' + (e && e.message ? e.message : e);
   }
@@ -101,6 +165,38 @@ async function main() {
   const player = createPlayerController(camera, document.body, colliders);
   scene.add(player.controls.object);
   let recoilLeft = 0;
+
+  // 角色加载：char2/3/4 当静态敌人（间距 ≥8m，朝向出生点 (0,·,5)），char1 玩家侧展示道具。
+  // 本批不做会动的敌人 AI（后续批次），只摆位 + PBR + 阴影。
+  const characterPlacements = [
+    { file: 'char2_moss_monster', x: -8, z: -4, enemy: true },
+    { file: 'char3_fem_soldier', x: 8, z: -4, enemy: true },
+    { file: 'char4_heavy_knight', x: 0, z: -9, enemy: true },
+    { file: 'char1_tactical_male', x: 2.5, z: 3, enemy: false },
+  ];
+  const loadedChars = [];
+  let charLoaded = 0;
+  const loadAll = () =>
+    Promise.allSettled(
+      characterPlacements.map((p) =>
+        loadCharacter(`assets/${p.file}.glb`).then((r) => ({ p, r })),
+      ),
+    ).then((results) => {
+      for (const res of results) {
+        if (res.status !== 'fulfilled') continue;
+        const { p, r } = res.value;
+        r.object.position.set(p.x, 0, p.z);
+        // 敌人朝向出生点 (0, z=5)：朝 +Z 偏 x 方向
+        if (p.enemy) {
+          const target = new THREE.Vector3(0, 0, 5);
+          r.object.lookAt(target);
+        }
+        scene.add(r.object);
+        loadedChars.push(r);
+        charLoaded += 1;
+      }
+    });
+  loadAll();
 
   // 命中后后坐力：准星上抬 + 随机角偏，0.3s 内回正（帧率无关）
   function applyRecoil(weapon) {
@@ -158,9 +254,11 @@ async function main() {
     hud.textContent =
       `backend=${backend} fps=${fps} locked=${player.controls.isLocked}` +
       ` weapon=${s.weapon} hits=${s.hits} postHp=${s.postHp} defeated=${s.defeated}` +
+      ` chars=${charLoaded}/4 postfx=${window.__postfx ? (window.__postfx.enabled ? 'on' : 'off') : 'n/a'}` +
       ` pos=(${camera.position.x.toFixed(1)},${camera.position.z.toFixed(1)})`;
 
-    if (renderer) renderer.render(scene, camera);
+    if (renderer && renderFrame) renderFrame(scene, camera);
+    else if (renderer) renderer.render(scene, camera);
     requestAnimationFrame(animate);
   }
   animate();

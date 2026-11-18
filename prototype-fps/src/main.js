@@ -1,6 +1,8 @@
 import * as THREE from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 import { createPlayerController } from './playerController.js';
+import { swingKick } from './shooting.js';
+import { createCombat } from './combat.js';
 
 export async function createRenderer(canvasContainer) {
   const renderer = new WebGPURenderer({ antialias: true });
@@ -48,21 +50,90 @@ export function createScene() {
     });
   }
 
-  return { scene, camera, colliders };
+  // 木桩：简单柱体，作为挥击目标；置于出生相机正前方、齐眼高，默认 -Z 朝向即可命中
+  const post = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.5, 2.4, 12),
+    new THREE.MeshStandardMaterial({ color: 0xaa8855 })
+  );
+  post.position.set(0, 1.7, 3.5);
+  scene.add(post);
+
+  return { scene, camera, colliders, post };
 }
 
 async function main() {
   const hud = document.getElementById('hud');
-  const { renderer, backend } = await createRenderer(document.body);
-  const { scene, camera, colliders } = createScene();
-  const player = createPlayerController(camera, renderer.domElement, colliders);
-  scene.add(player.controls.object);
+  const { scene, camera, colliders, post } = createScene();
 
-  renderer.domElement.addEventListener('click', () => player.controls.lock());
+  // 战斗内核：注入实时相机朝向，木桩用场景中的柱体位置
+  const postRadius = 0.5;
+  function targetPlain() {
+    return { position: { x: post.position.x, y: post.position.y, z: post.position.z }, radius: postRadius };
+  }
+  function cameraDir() {
+    const d = new THREE.Vector3(0, 0, -1);
+    d.applyQuaternion(camera.quaternion);
+    return { x: d.x, y: d.y, z: d.z };
+  }
+  function cameraOrigin() {
+    return { x: camera.position.x, y: camera.position.y, z: camera.position.z };
+  }
+  const combat = createCombat({ origin: cameraOrigin, dir: cameraDir, target: targetPlain });
+
+  // 脚本驱动接口（preview_eval 手测用，不依赖真实鼠标，也不依赖渲染器是否成功初始化）
+  window.__combat = combat;
+  window.__swing = () => combat.swing();
+  window.__switchTo = (k) => combat.switchTo(k);
+  window.__resetCombat = () => combat.reset();
+  window.__getCombatState = () => combat.state();
+
+  // 渲染器在 0x0 隐藏窗口下 init 会失败——不让它挡住游戏逻辑；失败时 HUD 标注 backend=none
+  let renderer = null;
+  let backend = 'none';
+  try {
+    const r = await createRenderer(document.body);
+    renderer = r.renderer;
+    backend = r.backend;
+  } catch (e) {
+    hud.textContent = 'renderer unavailable (window too small / no WebGPU): ' + (e && e.message ? e.message : e);
+  }
+
+  const player = createPlayerController(camera, document.body, colliders);
+  scene.add(player.controls.object);
+  let recoilLeft = 0;
+
+  // 命中后后坐力：准星上抬 + 随机角偏，0.3s 内回正（帧率无关）
+  function applyRecoil(weapon) {
+    const kick = swingKick(weapon, Math.random());
+    camera.rotation.z = kick.yaw;
+    recoilLeft = kick.recoverSeconds;
+  }
+  function updateRecoil(delta) {
+    if (recoilLeft <= 0) return;
+    recoilLeft = Math.max(0, recoilLeft - delta);
+    camera.rotation.z = THREE.MathUtils.lerp(camera.rotation.z, 0, Math.min(1, delta * 10));
+    if (recoilLeft <= 0) camera.rotation.z = 0;
+  }
+
+  // 鼠标左键 = 挥击（锁定状态下）
+  document.body.addEventListener('mousedown', (e) => {
+    if (e.button === 0 && player.controls.isLocked) {
+      const r = combat.swing();
+      if (r.swung && r.hit) applyRecoil(combat.weaponManager.currentWeapon());
+    }
+  });
+
+  // 数字键切换武器
+  document.addEventListener('keydown', (e) => {
+    if (e.code === 'Digit1' || e.code === 'Digit2' || e.code === 'Digit3') {
+      combat.switchTo(e.code.slice(5));
+    }
+  });
+
+  document.body.addEventListener('click', () => player.controls.lock());
   player.controls.addEventListener('lock', () => { window.__pointerLocked = true; });
   player.controls.addEventListener('unlock', () => { window.__pointerLocked = false; });
   window.__pointerLocked = false;
-  window.__playerPosition = camera.position;
 
   let frame = 0;
   let last = performance.now();
@@ -81,12 +152,15 @@ async function main() {
       last = now;
     }
 
-    if (player.controls.isLocked) {
-      player.update(delta);
-    }
-    hud.textContent = `backend=${backend} fps=${fps} locked=${player.controls.isLocked} pos=(${camera.position.x.toFixed(1)},${camera.position.z.toFixed(1)})`;
+    if (player.controls.isLocked) player.update(delta);
+    updateRecoil(delta);
+    const s = combat.state();
+    hud.textContent =
+      `backend=${backend} fps=${fps} locked=${player.controls.isLocked}` +
+      ` weapon=${s.weapon} hits=${s.hits} postHp=${s.postHp} defeated=${s.defeated}` +
+      ` pos=(${camera.position.x.toFixed(1)},${camera.position.z.toFixed(1)})`;
 
-    renderer.render(scene, camera);
+    if (renderer) renderer.render(scene, camera);
     requestAnimationFrame(animate);
   }
   animate();

@@ -2,6 +2,8 @@
 
 ## 待裁决清单
 
+状态：本批（近战挥击内核＋三武器切换）无新增阻断项。以下为历史遗留（本批未处理，不影响本批交付）：
+
 1. **图片上传到 Asset/OUS 失败（阻断四张人物图的图生 3D）**
    - 现象：`ous-cos.kujiale.com` 的 TLS 握手持续返回 `CRYPT_E_REVOCATION_OFFLINE`（证书吊销检查无法联网核验），`api.aholo3d.cn`（lux3d-cn MCP 本身）无此问题，证书签发链不同（DNSPod DV TLS RSA CA 2025）。
    - 已排查：系统时间显示正常但 `w32tm /query /status` 报 Leap 指示器未同步，上次成功同步在 19 小时前；`w32tm /resync /force` 需要管理员权限，当前权限被拒绝（0x80070005）；WinHTTP 无系统代理；重试 3 次持续失败，非偶发。

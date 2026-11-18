@@ -1,0 +1,27 @@
+{
+  "postHp": 30,
+  "shortSword": {
+    "name": "短剑",
+    "fireRate": 0.35,
+    "damage": 4,
+    "swingRange": 2.2,
+    "spread": 0.05,
+    "cooldown": 0.3
+  },
+  "oneHandedSword": {
+    "name": "单手剑",
+    "fireRate": 0.55,
+    "damage": 7,
+    "swingRange": 3.0,
+    "spread": 0.12,
+    "cooldown": 0.5
+  },
+  "twoHandedSword": {
+    "name": "双手剑",
+    "fireRate": 0.9,
+    "damage": 13,
+    "swingRange": 3.8,
+    "spread": 0.2,
+    "cooldown": 0.85
+  }
+}

@@ -6,10 +6,14 @@
     <style>
       html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
       #hud { position: fixed; top: 8px; left: 8px; color: #0f0; font: 12px monospace; z-index: 10; }
+      #hint { position: fixed; bottom: 10px; left: 50%; transform: translateX(-50%);
+               color: #8ff; font: 14px/1.6 system-ui, sans-serif; text-align: center;
+               z-index: 10; pointer-events: none; text-shadow: 0 1px 3px #000; }
     </style>
   </head>
   <body>
     <div id="hud">loading...</div>
+    <div id="hint">点击画面锁定鼠标 · WASD 移动 · Shift 冲刺 · 空格跳 · 1/2/3 切剑 · 左键挥砍 · Esc 解锁</div>
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>

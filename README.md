@@ -11,6 +11,7 @@
 - [ai4ai-bench](https://github.com/wanglin1111111/ai4ai-bench) — 审计 LLM Agent 递归自我改进（RSI）的基准（SIAS 审计框架，27 个已发布 harness 补丁的回溯审计）
 - [semantica](https://github.com/wanglin1111111/semantica) — Graph-Native Infrastructure for Context and Accountable AI（本地 KG fork + FORK-NOTES）
 - [BreathGuard 护院鹅](https://github.com/wanglin1111111/BreathGuard) — WiFi CSI 无感感知独居老人跌倒与呼吸，六区六级状态机 + 医学推理
+- [SenseField 听野](https://github.com/wanglin1111111/SenseField) — 低视力玩家无障碍游戏辅助项目推介页（原项目：ld0574 团队 · 罕见·无界黑客松参赛作品）
 
 ## 📦 技能库矩阵（按主题）
 
